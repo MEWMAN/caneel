@@ -26,6 +26,9 @@ AWAITING_BROADCAST_MESSAGE = {}
 LAST_LINK_TIME = {} 
 MONITORING_USERS = {} 
 USER_LANGUAGE_CACHE = {} 
+USER_COMMAND_COUNT = {}    
+USER_BAN_EXPIRY = {}       
+USER_LAST_CALLBACK_TIME = {} 
 
 DATABASE_NAME = 'bot_data.db'
 
@@ -79,8 +82,57 @@ def get_text(chat_id, key):
     return TEXTS.get(lang, TEXTS['ar']).get(key, TEXTS['ar'][key])
 
 
+def check_command_spam(chat_id, limit=5, window=60, ban_duration=600):
+    current_time = time.time()
+    
+    ban_expiry = USER_BAN_EXPIRY.get(chat_id, 0)
+    if current_time < ban_expiry:
+        return False
+
+    data = USER_COMMAND_COUNT.get(chat_id, {'count': 0, 'first_time': current_time})
+    
+    if (current_time - data['first_time']) > window:
+        data = {'count': 1, 'first_time': current_time}
+    else:
+        data['count'] += 1
+
+    USER_COMMAND_COUNT[chat_id] = data
+
+    if data['count'] > limit:
+        USER_BAN_EXPIRY[chat_id] = current_time + ban_duration
+        
+        try:
+            ban_message = get_text(chat_id, 'spam_banned_msg').format(int(ban_duration / 60))
+            # تم إضافة protect_content=True
+            bot.send_message(chat_id, ban_message, parse_mode="HTML", protect_content=True)
+        except Exception:
+            pass 
+            
+        return False
+        
+    return True
+
+def check_callback_spam(chat_id, delay=2):
+    current_time = time.time()
+    last_time = USER_LAST_CALLBACK_TIME.get(chat_id, 0)
+    
+    if (current_time - last_time) < delay:
+        try:
+            warning_message = get_text(chat_id, 'callback_wait_msg').format(delay)
+            # تم إضافة protect_content=True في kwargs لـ threading
+            threading.Thread(target=bot.send_message, args=(chat_id, warning_message, 'HTML'), kwargs={'protect_content': True}).start()
+        except Exception:
+            pass
+        return False
+    
+    USER_LAST_CALLBACK_TIME[chat_id] = current_time
+    return True
+
+
 TEXTS = {
     'ar': {
+        'spam_banned_msg': "🚫 <b>تم حظرك!</b>\nلقد أرسلت أوامر كثيرة في وقت قصير. تم منعك من استخدام البوت لمدة {} دقائق.", 
+        'callback_wait_msg': "⏳ <b>تريث قليلاً!</b>\nالرجاء الانتظار {} ثواني بين كل ضغطة زر وأخرى لتجنب حظر حسابك.",
         'welcome_choose_lang': "Hello! 👋\nPlease choose your preferred language:\n\n💡 <b>Note:</b> To change the language later, send the command: <code>/lang</code>",
         'welcome_developer': "Hello Developer! This is your control panel:",
         'lang_saved': "✅ تم اختيار اللغة العربية بنجاح!",
@@ -106,6 +158,8 @@ TEXTS = {
         'dev_controls_title': "Your control panel:"
     },
     'en': {
+        'spam_banned_msg': "🚫 <b>You are banned!</b>\nYou sent too many commands too quickly. You are banned from using the bot for {} minutes.",
+        'callback_wait_msg': "⏳ <b>Slow down!</b>\nPlease wait {} seconds between button clicks to avoid being banned.",
         'welcome_choose_lang': "Hello! 👋\nPlease choose your preferred language:\n\n💡 <b>Note:</b> To change the language later, send the command: <code>/lang</code>",
         'welcome_developer': "Hello Developer! This is your control panel:",
         'lang_saved': "✅ Language successfully set to English!",
@@ -131,6 +185,8 @@ TEXTS = {
         'dev_controls_title': "Your control panel:"
     },
     'ru': {
+        'spam_banned_msg': "🚫 <b>Вы заблокированы!</b>\nВы отправили слишком много команд слишком быстро. Вы заблокированы на {} минут.",
+        'callback_wait_msg': "⏳ <b>Подождите!</b>\nПожалуйста, подождите {} секунды между нажатиями кнопок, чтобы избежать блокировки.",
         'welcome_choose_lang': "Hello! 👋\nPlease choose your preferred language:\n\n💡 <b>Note:</b> To change the language later, send the command: <code>/lang</code>",
         'welcome_developer': "Здравствуйте, разработчик! Это ваша панель управления:",
         'lang_saved': "✅ Язык успешно изменен на русский!",
@@ -140,7 +196,7 @@ TEXTS = {
         'get_link_button': "Получить ссылку 🔗",
         'change_lang_button': "🌐 Изменить язык",
         'public_sub_fail': "🚫 <b>Подписка не удалась!</b>\nПожалуйста, сначала подпишитесь на публичный канал:\n{}\nЗатем нажмите /start снова.",
-        'technical_error': "⚠️ <b>Извините, произошла техническая ошибка или проблема с правами доступа.</b>\nУбедитесь, что бот является **администратором** в обоих каналах (публичном и приватном) و имеет права на приглашение и исключение, затем повторите попытку.",
+        'technical_error': "⚠️ <b>Извините, произошла техническая ошибка или проблема с правами доступа.</b>\nУбедитесь, что бот является **администратором** в обоих каналах (публичном و приватном) و имеет права на приглашение و исключение, затем повторите попытку.",
         'link_generated_msg': "✅ <b>Ссылка создана!</b>\n\nЭто ваша <b>временная ссылка-приглашение</b> в приватный канал:\n🔗 {}\n\n<b>Примечание:</b> Срок действия ссылки истечет через <b>одну минуту</b>. Пожалуйста, присоединяйтесь немедленно.",
         'link_failed': "⚠️ <b>Извините, не удалось создать ссылку!</b>\nПожалуйста, свяжитесь с администратором бота.",
         'link_expired': "⌛ <b>Извините, ваше время истекло!</b>\nСрок действия отправленной вам ссылки истек.",
@@ -283,18 +339,24 @@ def generate_invite_link_and_send(chat_id, message_id, user_info):
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
     chat_id = message.chat.id
+    
+    if not check_command_spam(chat_id):
+        return 
+
     current_time = time.time()
     
     if chat_id == DEVELOPER_ID:
         set_user_language(chat_id, 'ar') 
         USER_LANGUAGE_CACHE[chat_id] = 'ar' 
-        bot.send_message(chat_id, get_text(chat_id, 'welcome_developer'), reply_markup=developer_keyboard(chat_id))
+        # تم إضافة protect_content=True
+        bot.send_message(chat_id, get_text(chat_id, 'welcome_developer'), reply_markup=developer_keyboard(chat_id), protect_content=True)
         return 
 
     user_lang = get_user_language(chat_id)
     
     if user_lang is None:
-        bot.send_message(chat_id, TEXTS['ar']['welcome_choose_lang'], reply_markup=language_selection_keyboard(), parse_mode="HTML")
+        # تم إضافة protect_content=True
+        bot.send_message(chat_id, TEXTS['ar']['welcome_choose_lang'], reply_markup=language_selection_keyboard(), parse_mode="HTML", protect_content=True)
         return
 
     USER_LANGUAGE_CACHE[chat_id] = user_lang
@@ -302,40 +364,55 @@ def send_welcome(message):
     try:
         private_member = bot.get_chat_member(PRIVATE_CHANNEL_ID, chat_id)
         if private_member.status in ['creator', 'administrator', 'member']:
-            bot.send_message(chat_id, get_text(chat_id, 'already_member'), parse_mode="HTML")
+            # تم إضافة protect_content=True
+            bot.send_message(chat_id, get_text(chat_id, 'already_member'), parse_mode="HTML", protect_content=True)
             return
 
         last_link_time = LAST_LINK_TIME.get(chat_id)
         if last_link_time and (current_time - last_link_time < LINK_EXPIRY_SECONDS + 5): 
-            bot.send_message(chat_id, get_text(chat_id, 'link_active'), parse_mode="HTML")
+            # تم إضافة protect_content=True
+            bot.send_message(chat_id, get_text(chat_id, 'link_active'), parse_mode="HTML", protect_content=True)
             return
 
         public_member = bot.get_chat_member(PUBLIC_CHANNEL_ID, chat_id)
         
         if public_member.status in ['creator', 'administrator', 'member']:
-            bot.send_message(chat_id, get_text(chat_id, 'public_sub_ok'), reply_markup=main_keyboard(chat_id), parse_mode="HTML")
+            # تم إضافة protect_content=True
+            bot.send_message(chat_id, get_text(chat_id, 'public_sub_ok'), reply_markup=main_keyboard(chat_id), parse_mode="HTML", protect_content=True)
         else:
-            bot.send_message(chat_id, get_text(chat_id, 'public_sub_fail').format(PUBLIC_CHANNEL_ID), parse_mode="HTML")
+            # تم إضافة protect_content=True
+            bot.send_message(chat_id, get_text(chat_id, 'public_sub_fail').format(PUBLIC_CHANNEL_ID), parse_mode="HTML", protect_content=True)
 
     except Exception as e:
         print(f"Error in send_welcome for user {chat_id}: {e}")
-        bot.send_message(chat_id, get_text(chat_id, 'technical_error'), parse_mode="HTML")
+        # تم إضافة protect_content=True
+        bot.send_message(chat_id, get_text(chat_id, 'technical_error'), parse_mode="HTML", protect_content=True)
 
 @bot.message_handler(commands=['lang'])
 def handle_lang_command(message):
     chat_id = message.chat.id
+    
+    if not check_command_spam(chat_id):
+        return
+    
     if get_user_language(chat_id) is None:
         set_user_language(chat_id, 'ar') 
         USER_LANGUAGE_CACHE[chat_id] = 'ar'
     
-    bot.send_message(chat_id, get_text(chat_id, 'welcome_choose_lang'), reply_markup=language_selection_keyboard(), parse_mode="HTML")
+    # تم إضافة protect_content=True
+    bot.send_message(chat_id, get_text(chat_id, 'welcome_choose_lang'), reply_markup=language_selection_keyboard(), parse_mode="HTML", protect_content=True)
 
 @bot.callback_query_handler(func=lambda call: call.data.startswith(('set_lang_', 'generate_new_link', 'broadcast_start', 'show_resources_refresh')) or call.data.startswith('show_resources'))
 def handle_callbacks(call):
     chat_id = call.message.chat.id
-    message_id = call.message.message_id
+    
     bot.answer_callback_query(call.id) 
 
+    if not check_callback_spam(chat_id):
+        return
+
+    message_id = call.message.message_id
+    
     if call.data.startswith('set_lang_'):
         new_lang = call.data.split('_')[2]
         set_user_language(chat_id, new_lang)
@@ -354,7 +431,8 @@ def handle_callbacks(call):
 
     if chat_id == DEVELOPER_ID:
         if call.data == 'broadcast_start':
-            bot.send_message(chat_id, get_text(chat_id, 'broadcast_start'), parse_mode="HTML")
+            # تم إضافة protect_content=True
+            bot.send_message(chat_id, get_text(chat_id, 'broadcast_start'), parse_mode="HTML", protect_content=True)
             AWAITING_BROADCAST_MESSAGE[chat_id] = True
             return
         
@@ -367,7 +445,7 @@ def handle_callbacks(call):
             try:
                 bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=resources_info, parse_mode="HTML", reply_markup=markup)
             except Exception:
-                 pass
+                pass
             return
 
     if call.data == 'generate_new_link':
@@ -420,12 +498,14 @@ def handle_broadcast_message(message):
     for user_id in all_users:
         if user_id != DEVELOPER_ID:
             try:
-                bot.send_message(user_id, broadcast_message_text, parse_mode="HTML")
+                # تم إضافة protect_content=True
+                bot.send_message(user_id, broadcast_message_text, parse_mode="HTML", protect_content=True)
                 success_count += 1
             except Exception:
                 fail_count += 1
 
-    bot.send_message(chat_id, get_text(chat_id, 'broadcast_success').format(success_count, fail_count), reply_markup=developer_keyboard(chat_id), parse_mode="HTML")
+    # تم إضافة protect_content=True
+    bot.send_message(chat_id, get_text(chat_id, 'broadcast_success').format(success_count, fail_count), reply_markup=developer_keyboard(chat_id), parse_mode="HTML", protect_content=True)
 
 
 print("البوت يعمل...")
