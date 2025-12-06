@@ -17,7 +17,7 @@ try:
     PRIVATE_CHANNEL_ID = int(os.getenv("PRIVATE_CHANNEL_ID"))
     LINK_EXPIRY_SECONDS = int(os.getenv("LINK_EXPIRY_SECONDS", 60))
 except (TypeError, ValueError):
-    print("FATAL ERROR: DEVELOPER_ID, PRIVATE_CHANNEL_ID, or LINK_EXPIRY_SECONDS is missing or invalid in .env")
+    print("[ERROR] Invalid .env configuration")
     sys.exit(1)
     
 PUBLIC_CHANNEL_ID = os.getenv("PUBLIC_CHANNEL_ID")
@@ -29,7 +29,7 @@ LINK_REQUEST_WINDOW = 30 * 60
 USER_LINK_REQUESTS = {}  
 
 if not TOKEN or not PUBLIC_CHANNEL_ID:
-    print("FATAL ERROR: TOKEN or PUBLIC_CHANNEL_ID is missing in .env")
+    print("[ERROR] Missing required .env variables")
     sys.exit(1)
 
 bot = telebot.TeleBot(TOKEN)
@@ -47,9 +47,9 @@ def safe_edit_message_text(chat_id, message_id, text, reply_markup=None, parse_m
         if "message is not modified" in str(e):
             pass
         else:
-            raise e
-    except Exception:
-        pass
+            print(f"[WARNING] Edit message error: {e}")
+    except Exception as e:
+        print(f"[WARNING] Edit message exception: {e}")
 
 LAST_LINK_TIME = {}
 MONITORING_USERS = {}
@@ -71,6 +71,7 @@ def init_db():
     """)
     conn.commit()
     conn.close()
+    print("[INFO] Database initialized")
 
 def get_user_language(user_id):
     conn = sqlite3.connect(DATABASE_NAME)
@@ -113,6 +114,12 @@ def get_text(chat_id, key):
 
     return TEXTS.get(lang, TEXTS['ar']).get(key, TEXTS['ar'][key])
 
+def safe_send_message(chat_id, text, **kwargs):
+    try:
+        return bot.send_message(chat_id, text, **kwargs)
+    except Exception as e:
+        print(f"[WARNING] Send message failed: {e}")
+        return None
 
 def check_command_spam(chat_id, limit=5, window=60, ban_duration=600):
     if chat_id == DEVELOPER_ID:
@@ -135,13 +142,8 @@ def check_command_spam(chat_id, limit=5, window=60, ban_duration=600):
 
     if data['count'] > limit:
         USER_BAN_EXPIRY[chat_id] = current_time + ban_duration
-
-        try:
-            ban_message = get_text(chat_id, 'spam_banned_msg').format(int(ban_duration / 60))
-            bot.send_message(chat_id, ban_message, parse_mode="HTML", protect_content=True)
-        except Exception:
-            pass
-
+        ban_message = get_text(chat_id, 'spam_banned_msg').format(int(ban_duration / 60))
+        safe_send_message(chat_id, ban_message, parse_mode="HTML", protect_content=True)
         return False
 
     return True
@@ -154,11 +156,8 @@ def check_callback_spam(chat_id, delay=2):
     last_time = USER_LAST_CALLBACK_TIME.get(chat_id, 0)
 
     if (current_time - last_time) < delay:
-        try:
-            warning_message = get_text(chat_id, 'callback_wait_msg').format(delay)
-            bot.send_message(chat_id, warning_message, parse_mode='HTML', protect_content=True)
-        except Exception:
-            pass
+        warning_message = get_text(chat_id, 'callback_wait_msg').format(delay)
+        safe_send_message(chat_id, warning_message, parse_mode='HTML', protect_content=True)
         return False
 
     USER_LAST_CALLBACK_TIME[chat_id] = current_time
@@ -175,16 +174,12 @@ def check_link_request_spam(chat_id):
     USER_LINK_REQUESTS.setdefault(chat_id, []).append(current_time)
 
     if len(USER_LINK_REQUESTS[chat_id]) > LINK_REQUEST_LIMIT:
-        try:
-            ban_msg = get_text(chat_id, 'link_request_banned_msg')
-            bot.send_message(chat_id, ban_msg, parse_mode="HTML", protect_content=True)
-        except Exception:
-            pass
+        ban_msg = get_text(chat_id, 'link_request_banned_msg')
+        safe_send_message(chat_id, ban_msg, parse_mode="HTML", protect_content=True)
         USER_LINK_REQUESTS.pop(chat_id, None)
-        return False 
+        return False
 
-    return True 
-
+    return True
 
 TEXTS = {
     'ar': {
@@ -288,7 +283,6 @@ TEXTS = {
     }
 }
 
-
 def main_keyboard(chat_id):
     markup = types.InlineKeyboardMarkup()
     btn_get_link = types.InlineKeyboardButton(get_text(chat_id, 'get_link_button'), callback_data='generate_new_link')
@@ -345,7 +339,6 @@ def resources_back_keyboard(chat_id):
     markup.add(btn_refresh, btn_back)
     return markup
 
-
 def edit_link_message_expired(chat_id, message_id):
     try:
         safe_edit_message_text(
@@ -369,7 +362,8 @@ def monitor_user_join(chat_id):
 
     if (current_time - start_time) > (LINK_EXPIRY_SECONDS + 5):
         edit_link_message_expired(chat_id, message_id)
-        if user_data.get('timer'): user_data['timer'].cancel()
+        if user_data.get('timer'): 
+            user_data['timer'].cancel()
         MONITORING_USERS.pop(chat_id, None)
         return
 
@@ -383,17 +377,17 @@ def monitor_user_join(chat_id):
                 parse_mode="HTML"
             )
 
-            if user_data.get('timer'): user_data['timer'].cancel()
+            if user_data.get('timer'): 
+                user_data['timer'].cancel()
             MONITORING_USERS.pop(chat_id, None)
             return
 
     except Exception as e:
-        print(f"Error checking private membership during monitoring for {chat_id}: {e}")
+        print(f"[WARNING] Monitor check error: {e}")
 
     new_timer = threading.Timer(5, monitor_user_join, args=[chat_id])
     user_data['timer'] = new_timer
     new_timer.start()
-
 
 def generate_invite_link_and_send(chat_id, message_id, user_info):
     try:
@@ -417,7 +411,7 @@ def generate_invite_link_and_send(chat_id, message_id, user_info):
         timer.start()
 
     except Exception as e:
-        print(f"Error generating invite link for {chat_id}: {e}")
+        print(f"[ERROR] Link generation failed: {e}")
         safe_edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
@@ -439,8 +433,7 @@ def handle_all_messages(message):
     except Exception:
         pass 
     
-    check_command_spam(chat_id) 
-
+    check_command_spam(chat_id)
 
 @bot.message_handler(commands=['start'])
 def send_welcome(message):
@@ -494,7 +487,7 @@ def send_welcome(message):
             bot.send_message(chat_id, get_text(chat_id, 'public_sub_fail').format(PUBLIC_CHANNEL_ID), parse_mode="HTML", protect_content=True)
 
     except Exception as e:
-        print(f"Error in send_welcome for user {chat_id}: {e}")
+        print(f"[ERROR] Welcome error: {e}")
         bot.send_message(chat_id, get_text(chat_id, 'technical_error'), parse_mode="HTML", protect_content=True)
 
 @bot.message_handler(commands=['lang'])
@@ -536,7 +529,10 @@ def callback_inline(call):
     
     global MAINTENANCE_MODE
     
-    bot.answer_callback_query(call.id)
+    try:
+        bot.answer_callback_query(call.id)
+    except Exception:
+        pass
 
     if not check_callback_spam(chat_id):
         return
@@ -607,7 +603,7 @@ def callback_inline(call):
             check_link_request_spam(chat_id)
             return
 
-        temp_message_text = get_text(chat_id, 'link_generated_msg').split("\n")[0].replace("✅", "⏳") + "\n" + "الرجاء الانتظار قليلاً..."
+        temp_message_text = get_text(chat_id, 'link_generated_msg').split("\n")[0].replace("✅", "⏳") + "\n" + "Please wait..."
         try:
             safe_edit_message_text(chat_id=chat_id, message_id=message_id, text=temp_message_text, parse_mode="HTML")
         except Exception:
@@ -664,40 +660,71 @@ def callback_inline(call):
 
 @bot.chat_member_handler()
 def handle_chat_member(chat_member_update: types.ChatMemberUpdated):
-    user_id = chat_member_update.from_user.id
-    new_status = chat_member_update.new_chat_member.status
-    chat_id = chat_member_update.chat.id
-    
-    if chat_id == PRIVATE_CHANNEL_ID and new_status in ['member', 'administrator', 'creator']:
-        if user_id in MONITORING_USERS:
-            if MONITORING_USERS[user_id].get('timer'):
-                MONITORING_USERS[user_id]['timer'].cancel()
-            
-            try:
+    try:
+        user_id = chat_member_update.from_user.id
+        new_status = chat_member_update.new_chat_member.status
+        chat_id = chat_member_update.chat.id
+        
+        if chat_id == PRIVATE_CHANNEL_ID and new_status in ['member', 'administrator', 'creator']:
+            if user_id in MONITORING_USERS:
+                if MONITORING_USERS[user_id].get('timer'):
+                    MONITORING_USERS[user_id]['timer'].cancel()
+                
                 safe_edit_message_text(
                     chat_id=user_id,
                     message_id=MONITORING_USERS[user_id]['message_id'],
                     text=get_text(user_id, 'join_success'),
                     parse_mode="HTML"
                 )
-            except Exception:
-                pass 
-            
-            MONITORING_USERS.pop(user_id, None)
+                
+                MONITORING_USERS.pop(user_id, None)
 
-    if chat_id == PUBLIC_CHANNEL_ID and new_status in ['left', 'kicked', 'banned']:
+        if chat_id == PUBLIC_CHANNEL_ID and new_status in ['left', 'kicked', 'banned']:
+            try:
+                bot.unban_chat_member(PRIVATE_CHANNEL_ID, user_id)
+                bot.send_message(user_id, get_text(user_id, 'sub_removed').format(PUBLIC_CHANNEL_ID), parse_mode="HTML", protect_content=True)
+            except Exception as e:
+                print(f"[WARNING] Channel leave handling: {e}")
+    except Exception as e:
+        print(f"[WARNING] Chat member handler: {e}")
+
+def run_bot_forever():
+    print("[INFO] Initializing Database...")
+    init_db()
+    
+    connection_attempts = 0
+    
+    while True:
         try:
-            bot.unban_chat_member(PRIVATE_CHANNEL_ID, user_id)
-            
-            bot.send_message(user_id, get_text(user_id, 'sub_removed').format(PUBLIC_CHANNEL_ID), parse_mode="HTML", protect_content=True)
+            print(f"[INFO] Bot starting... (Attempt {connection_attempts + 1})")
+            bot.infinity_polling(timeout=30, long_polling_timeout=20, logger_level=None)
+        except KeyboardInterrupt:
+            print("\n[INFO] Bot stopped by user")
+            break
+        except telebot.apihelper.ApiTelegramException as e:
+            connection_attempts += 1
+            if "Too Many Requests" in str(e):
+                print(f"[WARNING] Rate limited. Waiting 60 seconds...")
+                time.sleep(60)
+            else:
+                print(f"[ERROR] Telegram API error: {e}")
+                print(f"[INFO] Reconnecting in 10 seconds...")
+                time.sleep(10)
         except Exception as e:
-            print(f"Error handling public channel leave for {user_id}: {e}")
+            connection_attempts += 1
+            error_type = type(e).__name__
+            if "Read timed out" in str(e) or "Connection" in str(e):
+                print(f"[WARNING] Internet connection lost")
+            else:
+                print(f"[ERROR] Unexpected error ({error_type}): {e}")
+            
+            wait_time = min(10 * (2 ** (connection_attempts - 1)), 300)
+            print(f"[INFO] Reconnecting in {wait_time} seconds...")
+            time.sleep(wait_time)
+            
+            if connection_attempts % 10 == 0:
+                print(f"[INFO] Cleanup cycle - resetting connection attempts")
+                connection_attempts = 0
 
 if __name__ == '__main__':
-    print("Initializing Database...")
-    init_db()
-    print("Bot is starting...")
-    try:
-        bot.infinity_polling(timeout=10, long_polling_timeout=5)
-    except Exception as e:
-        print(f"An error occurred during bot polling: {e}")
+    run_bot_forever()
