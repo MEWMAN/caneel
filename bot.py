@@ -34,6 +34,23 @@ if not TOKEN or not PUBLIC_CHANNEL_ID:
 
 bot = telebot.TeleBot(TOKEN)
 
+def safe_edit_message_text(chat_id, message_id, text, reply_markup=None, parse_mode="HTML"):
+    try:
+        bot.edit_message_text(
+            chat_id=chat_id,
+            message_id=message_id,
+            text=text,
+            reply_markup=reply_markup,
+            parse_mode=parse_mode
+        )
+    except telebot.apihelper.ApiTelegramException as e:
+        if "message is not modified" in str(e):
+            pass
+        else:
+            raise e
+    except Exception:
+        pass
+
 LAST_LINK_TIME = {}
 MONITORING_USERS = {}
 USER_LANGUAGE_CACHE = {}
@@ -256,7 +273,7 @@ TEXTS = {
         'link_failed': "⚠️ <b>Извините, не удалось создать ссылку!</b>\nПожалуйста, свяжитесь с администратором бота.",
         'link_expired': "⌛ <b>Извините, ваше время истекло!</b>\nСрок действия отправленной вам ссылки истек.",
         'join_success': "🎉 <b>Успешное присоединение!</b>\nДобро пожаловать в приватный канал. Временная ссылка отключена.",
-        'sub_removed': "🚫 <b>Вы были исключены!</b> Вы отменили подписку на публичный канал.\nПожалуйста, подпишитесь снова на {} чтобы получить ссылку وвернуться в приватный канал.",
+        'sub_removed': "🚫 <b>Вы были исключены!</b> Вы отменили подписку на публичный канал.\nПожалуйста, подпишитесь снова на {} чтобы получить ссылку ивернуться в приватный канал.",
         'resources_title': "📊 <b>Использование ресурсов сервера</b> 📊",
         'cpu_usage': "--- 🖥️ Процессор (CPU) ---\n<b>Использование:</b> <code>{}%</code>",
         'ram_usage': "--- 🧠 Память (RAM) ---\n<b>Всего:</b> <code>{:.2f} GB</code>\n<b>Доступно:</b> <code>{:.2f} GB</code>\n<b>Использовано:</b> <code>{}%</code>",
@@ -331,7 +348,7 @@ def resources_back_keyboard(chat_id):
 
 def edit_link_message_expired(chat_id, message_id):
     try:
-        bot.edit_message_text(
+        safe_edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
             text=get_text(chat_id, 'link_expired'),
@@ -359,7 +376,7 @@ def monitor_user_join(chat_id):
     try:
         member = bot.get_chat_member(PRIVATE_CHANNEL_ID, chat_id)
         if member.status in ['creator', 'administrator', 'member']:
-            bot.edit_message_text(
+            safe_edit_message_text(
                 chat_id=chat_id,
                 message_id=message_id,
                 text=get_text(chat_id, 'join_success'),
@@ -387,7 +404,7 @@ def generate_invite_link_and_send(chat_id, message_id, user_info):
         invite_link = bot.create_chat_invite_link(PRIVATE_CHANNEL_ID, member_limit=1, expire_date=int(time.time()) + LINK_EXPIRY_SECONDS, name=user_label)
         link = invite_link.invite_link
 
-        bot.edit_message_text(
+        safe_edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
             text=get_text(chat_id, 'link_generated_msg').format(link),
@@ -401,7 +418,7 @@ def generate_invite_link_and_send(chat_id, message_id, user_info):
 
     except Exception as e:
         print(f"Error generating invite link for {chat_id}: {e}")
-        bot.edit_message_text(
+        safe_edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
             text=get_text(chat_id, 'link_failed') + " " + get_text(chat_id, 'technical_error'),
@@ -530,7 +547,7 @@ def callback_inline(call):
         USER_LANGUAGE_CACHE[chat_id] = lang_code
         
         if chat_id == DEVELOPER_ID: 
-            bot.edit_message_text(
+            safe_edit_message_text(
                 chat_id=chat_id,
                 message_id=message_id,
                 text=get_text(chat_id, 'lang_saved') + "\n" + get_text(chat_id, 'welcome_developer'),
@@ -538,7 +555,7 @@ def callback_inline(call):
                 parse_mode="HTML"
             )
         else: 
-            bot.edit_message_text(
+            safe_edit_message_text(
                 chat_id=chat_id,
                 message_id=message_id,
                 text=get_text(chat_id, 'lang_saved'),
@@ -563,7 +580,7 @@ def callback_inline(call):
             pass 
 
         if chat_id in MONITORING_USERS:
-            bot.edit_message_text(
+            safe_edit_message_text(
                 chat_id=chat_id,
                 message_id=message_id,
                 text=get_text(chat_id, 'link_active'),
@@ -580,7 +597,7 @@ def callback_inline(call):
             
             cooldown_msg = get_text(chat_id, 'link_cooldown_msg').format(minutes)
 
-            bot.edit_message_text(
+            safe_edit_message_text(
                 chat_id=chat_id,
                 message_id=message_id,
                 text=cooldown_msg,
@@ -592,7 +609,7 @@ def callback_inline(call):
 
         temp_message_text = get_text(chat_id, 'link_generated_msg').split("\n")[0].replace("✅", "⏳") + "\n" + "الرجاء الانتظار قليلاً..."
         try:
-            bot.edit_message_text(chat_id=chat_id, message_id=message_id, text=temp_message_text, parse_mode="HTML")
+            safe_edit_message_text(chat_id=chat_id, message_id=message_id, text=temp_message_text, parse_mode="HTML")
         except Exception:
             pass 
 
@@ -603,7 +620,7 @@ def callback_inline(call):
         return
 
     if data == 'dev_home':
-        bot.edit_message_text(
+        safe_edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
             text=get_text(chat_id, 'welcome_developer'),
@@ -614,7 +631,7 @@ def callback_inline(call):
 
     if data == 'maintenance_on':
         MAINTENANCE_MODE = True
-        bot.edit_message_text(
+        safe_edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
             text=get_text(chat_id, 'maintenance_on_msg'),
@@ -625,7 +642,7 @@ def callback_inline(call):
 
     if data == 'maintenance_off':
         MAINTENANCE_MODE = False
-        bot.edit_message_text(
+        safe_edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
             text=get_text(chat_id, 'maintenance_off_msg'),
@@ -636,7 +653,7 @@ def callback_inline(call):
     
     if data == 'show_resources':
         resources_info = get_resource_info(chat_id)
-        bot.edit_message_text(
+        safe_edit_message_text(
             chat_id=chat_id,
             message_id=message_id,
             text=resources_info,
@@ -657,7 +674,7 @@ def handle_chat_member(chat_member_update: types.ChatMemberUpdated):
                 MONITORING_USERS[user_id]['timer'].cancel()
             
             try:
-                bot.edit_message_text(
+                safe_edit_message_text(
                     chat_id=user_id,
                     message_id=MONITORING_USERS[user_id]['message_id'],
                     text=get_text(user_id, 'join_success'),
